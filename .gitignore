@@ -1,0 +1,6 @@
+# Data files
+data/
+stock.db
+
+# macOS specific files
+.DS_Store

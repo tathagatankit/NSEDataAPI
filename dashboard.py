@@ -1,0 +1,134 @@
+import streamlit as st
+import sqlite3
+import pandas as pd
+import subprocess
+from datetime import datetime, timedelta
+
+DB_PATH = "stock.db"
+
+def get_data_summary():
+    """Fetches data from the database for display."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        # Query to get the latest date for each index
+        query = """
+            SELECT index_name, COUNT(*) as record_count, MIN(date_key) as from_date, MAX(date_key) as to_date
+            FROM stock_index_price_daily
+            GROUP BY index_name
+            ORDER BY index_name;
+        """
+        df = pd.read_sql_query(query, conn)
+        return df
+    except sqlite3.Error as e:
+        st.error(f"Database error: {e}")
+        return pd.DataFrame()
+    finally:
+        if 'conn' in locals() and conn:
+            conn.close()
+
+def run_fetch_pipeline(index_name):
+    """Runs the data fetching script as a subprocess."""
+    st.info(f"Fetching data for '{index_name}'... This may take a moment.")
+    
+    # We will call the python script directly using the virtual environment's python
+    # This is better than importing as it will run in its own process
+    # and not block the dashboard's event loop if it's long-running.
+    process = subprocess.Popen(
+        ['venv/bin/python', 'fetch_and_insert.py', '--index', index_name],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
+    )
+    
+    # Display output in real-time
+    stdout_placeholder = st.empty()
+    stderr_placeholder = st.empty()
+    stdout_log = ""
+    stderr_log = ""
+
+    while process.poll() is None:
+        stdout_line = process.stdout.readline()
+        if stdout_line:
+            stdout_log += stdout_line
+            stdout_placeholder.text_area("Script Output", stdout_log, height=200)
+
+        stderr_line = process.stderr.readline()
+        if stderr_line:
+            stderr_log += stderr_line
+            stderr_placeholder.text_area("Script Errors", stderr_log, height=100)
+
+    # After process finishes, get remaining output
+    stdout, stderr = process.communicate()
+    if stdout:
+        stdout_log += stdout
+        stdout_placeholder.text_area("Script Output", stdout_log, height=200)
+    if stderr:
+        stderr_log += stderr
+        stderr_placeholder.text_area("Script Errors", stderr_log, height=100)
+
+    if process.returncode == 0:
+        st.success(f"Successfully fetched and updated data for '{index_name}'.")
+        # Refresh the data summary
+        st.experimental_rerun()
+    else:
+        st.error(f"Failed to fetch data for '{index_name}'. Check the error logs above.")
+
+
+# --- Streamlit App UI ---
+st.set_page_config(page_title="Stock Data Dashboard", layout="wide")
+st.title("Stock Index Price Dashboard")
+
+st.header("Current Data Summary")
+st.write("This table shows a summary of the records currently in the database.")
+
+summary_df = get_data_summary()
+
+if summary_df.empty:
+    st.warning("No data found in the database. Please fetch data to get started.")
+else:
+    st.dataframe(summary_df, use_container_width=True)
+
+st.header("Fetch New Data")
+st.write("Select an index and click the button to fetch the latest data from the API.")
+
+# List of indices from the script
+INDICES = [
+    'NIFTY500 FLEXICAP', 'Nifty Pvt Bank', 'Nifty 200', 'Nifty 50', 'Nifty 500', 'Nifty Auto', 'Nifty Bank', 'Nifty Commodities', 'Nifty Consumption', 'Nifty CPSE', 
+    'Nifty Div Opps 50', 'Nifty Energy', 'Nifty Fin Service', 'Nifty FMCG', 'Nifty GrowSect 15', 
+    'Nifty Infra', 'Nifty IT', 'Nifty Media', 'Nifty Metal', 'Nifty Mid Liq 15', 
+    'NIFTY MIDCAP 100', 'Nifty Midcap 50', 'Nifty MNC', 'Nifty Next 50', 'Nifty Pharma', 
+    'Nifty PSE', 'Nifty PSU Bank', 'Nifty 100', 'NIFTY100 QUALTY30', 'Nifty Realty', 
+    'Nifty Serv Sector', 'NIFTY SMLCAP 100', 'Nifty100 Liq 15', 'Nifty50 Div Point', 
+    'Nifty50 PR 1x Inv', 'Nifty50 PR 2x Lev', 'Nifty50 TR 1x Inv', 'Nifty50 TR 2x Lev', 
+    'Nifty50 Value 20', 'NIFTY 1D RATE INDEX', 'NIFTY 50 ARBITRAGE', 'NIFTY 50 FUTURES INDEX', 
+    'NIFTY 50 FUTURES TR INDEX', 'NIFTY ADITYA BIRLA GROUP', 'NIFTY ALPHA 50', 
+    'NIFTY FULL MIDCAP 100', 'NIFTY FULL SMALLCAP 100', 
+    'Nifty HighBeta 50', 'Nifty Low Vol 50', 'NIFTY MAHINDRA GROUP', 'NIFTY MIDCAP 150', 'Nifty Shariah 25', 'NIFTY SMLCAP 250', 
+    'NIFTY SMLCAP 50', 'NIFTY TATA GROUP', 'NIFTY TATA 25 CAP', 'NIFTY100 EQL WGT', 'NIFTY100 LOWVOL30',
+    'Nifty50 Shariah', 'NIFTY50 USD', 'Nifty500 Shariah', 'NIFTY 5YR BENCHMARK G-SEC INDEX', 
+    'Nifty GS 10Yr', 'Nifty GS 10Yr Cln', 'Nifty GS 11 15Yr', 'Nifty GS 15YrPlus', 'Nifty GS 4 8Yr', 
+    'Nifty GS 8 13Yr', 'Nifty GS Compsite', 'NIFTY AAA CORPORATE BOND', 'NIFTY AAA LONG-TERM CORPORATE BOND', 
+    'NIFTY AAA MEDIUM-TERM CORPORATE BOND', 'NIFTY AAA SHORT-TERM CORPORATE BOND', 'NIFTY AAA ULTRA LONG-TERM CORPORATE BOND', 
+    'NIFTY AAA ULTRA SHORT-TERM CORPORATE BOND', 'NIFTY ALPHALOWVOL', 'Nifty AQL 30', 'Nifty Qlty LV 30', 'Nifty AQLV 30', 
+    'NIFTY50 EQL WGT', 'NIFTY 50 BLENDED 10 YR BENCHMARK G-SEC - GROWTH INDEX', 'NIFTY NEXT 50 BLENDED 10 YR BENCHMARK G-SEC - GROWTH INDEX', 
+    'NIFTY 10 YEAR SDL INDEX', 'NIFTY SME EMERGE', 'Nifty500 Value 50', 'NIFTY200 QUALITY 30', 'Nifty100 Enh ESG', 'NIFTY100 ESG', 'Nifty BHARAT Bond Index - April 2023', 
+    'BHARATBOND-APR30', 'BHARATBOND-APR25', 'BHARATBOND-APR31', 'NIFTY M150 QLTY50', 'NIFTY FINSRV25 50', 'Nifty100ESGSecLdr', 'Nifty200Momentm30', 'Nifty100 Alpha 30', 
+    'Nifty CPSE Bond Plus SDL Sep 2024 50:50 Index', 'NIFTY HEALTHCARE', 'NIFTY MIDSML 400', 'NIFTY500 MULTICAP', 'Nifty PSU Bond Plus SDL Apr 2026 50:50 Index', 
+    'Nifty AAA Bond Plus SDL Apr 2026 50:50 Index', 'NIFTY MICROCAP250', 'NIFTY INDIA MFG', 'Nifty New Consump', 'Nifty SDL Apr 2026 Top 20 Equal Weight Index', 
+    'Nifty India Government Fully Accessible Route (FAR) Select 7 Bonds Index (USD)', 'Nifty India Government Fully Accessible Route (FAR) Select 7 Bonds Index (INR)', 
+    'NIFTY CONSR DURBL', 'NIFTY OIL AND GAS', 'NIFTY LARGEMID250', 'Nifty SDL Plus PSU Bond Sep 2026 60:40 Index', 'NIFTY MID SELECT', 'Nifty PSU Bond Plus SDL Sep 2027 40:60 Index', 
+    'Nifty PSU Bond Plus SDL Apr 2027 50:50 Index', 'NIFTY AAA BOND PLUS SDL APR 2031 70:30 INDEX', 'NIFTY AAA BOND PLUS SDL APR 2026 70:30 INDEX', 'NIFTY TOTAL MKT', 'Nifty NonCyc Cons', 
+    'BHARATBOND-APR32', 'Nifty Mobility', 'NIFTY IND DIGITAL', 'NIFTY INTERNET', 'Nifty CPSE Bond Plus SDL Sep 2026 50:50 Index', 'Nifty SDL Apr 2027 Index', 'Nifty Ind Defence', 
+    'Nifty SDL Apr 2027 Top 12 Equal Weight Index', 'Nifty SDL Apr 2032 Top 12 Equal Weight Index', 'Nifty FinSerExBnk', 'Nifty Housing', 'Nifty Trans Logis', 
+    'Nifty SDL Plus G-Sec Jun 2028 30:70 Index', 'Nifty SDL Plus AAA PSU Bond Dec 2027 60:40 Index', 'Nifty SDL Jun 2027 Index', 'Nifty SDL Sep 2027 Index', 
+    'Nifty AAA CPSE Bond Plus SDL Apr 2027 60:40 Index', 'Nifty G-Sec Jun 2027 Index', 'Nifty AQLV 30 Plus 5yr G-Sec 70:30 index', 'Nifty Fixed Income PRC Indices', 
+    'Nifty200 Alpha 30', 'Nifty MS Fin Serv', 'NIFTY MIDSML HLTH', 'Nifty MS IT Telcm', 'NIFTYM150MOMNTM50', 'Nifty SDL Sep 2025 Index', 'Nifty SDL Dec 2028 Index', 'Nifty SDL Plus AAA PSU Bond Jul 2028 60:40 Index', 'Nifty G-Sec Dec 2030 Index', 'Nifty SDL Plus AAA PSU Bond Jul 2033 60:40 Index', 'Nifty AAA PSU Bond Plus SDL Sep 2026 50:50 Index', 'Nifty MS Ind Cons', 'Nifty G-Sec Dec 2026 Index', 'Nifty G-Sec Jul 2031 Index', 'Nifty SDL Sep 2026 Index', 'Nifty SDL Plus G-Sec Jun 2028 70:30 Index', 'Nifty G-Sec Sep 2027 Index', 'Nifty G-Sec Jun 2036 Index', 'Nifty G-Sec Sep 2032 Index', 'BHARATBOND-APR33', 'Nifty SDL Sep 2026 V1 Index', 'Nifty SDL Jul 2026 Index', 'Nifty G-Sec Dec 2029 Index', 'Nifty AAA PSU Bond Plus SDL Apr 2026 50:50 Index', 'Nifty SDL Dec 2026 Index', 'Nifty SDL Plus G-Sec Sep 2027 50:50 Index', 'Nifty SDL Plus AAA PSU Bond Apr 2026 75:25 Index', 'Nifty SDL Plus G-Sec Jun 2029 70:30 Index', 'Nifty SDL Jul 2033 Index', 'Nifty India Sovereign Green Bond Dec 2033 Index', 'Nifty India Sovereign Green Bond June 2028 Index', 'Nifty G-Sec Oct 2028 Index', 'Nifty SDL Oct 2026 Index', 'Nifty India Municipal Bond Index', 'Nifty G-Sec Apr 2029 Index', 'Nifty SDL Plus AAA PSU Bond Apr 2028 75:25 Index', 'Nifty G-Sec May 2029 Index', 'Nifty India Sovereign Green Bond Jan 2033 Index', 'Nifty India Sovereign Green Bond Jan 2028 Index', 'Nifty SDL Plus G-Sec June 2027 40:60 Index', 'Nifty SDL Jul 2028 Index', 'Nifty G-Sec Jul 2027 Index', 'Nifty Sml250 Q50', 'Nifty SDL June 2028 Index', 'Nifty REITs & InvITs', 'Nifty Multi Asset - Equity : Arbitrage : REITS/INVITS (50:40:10) Index', 'Nifty Multi Asset - Equity : Debt : Arbitrage : REITS/INVITS (50:20:20:10) Index', 'Nifty CoreHousing', 'Nifty 5 Year SDL Index', 'Nifty 3 Year SDL Index', 'Nifty G-Sec Jul 2033 Index', 'NiftySml250MQ 100', 'NiftyMS400 MQ 100', 'NIFTY MULTI MFG', 'NIFTY MULTI INFRA', 'Nifty AAA Bond Jun 2025 HTM Index', 'Nifty India Corporate Group Index - Aditya Birla Group', 'Nifty India Corporate Group Index - Mahindra Group', 'Nifty India Corporate Group Index - Tata Group', 'Nifty EV', 'Nifty500 EW', 'Nifty500Momentm50', 'Nifty500 LMS Eql', 'Nifty200 Value 30', 'Nifty Ind Tourism', 'Nifty Top 10 EW', 'Nifty IPO', 'Nifty Rural', 'Nifty Multi MQ 50', 'Nifty Capital Mkt', 'Nifty Top 15 EW', 'Nifty Top 20 EW', 'Nifty Corp MAATR', 'Nifty India Railways PSU', 'Nifty500 Qlty50', 'Nifty500 LowVol50', 'Nifty500 MQVLv50', 'Nifty AAA Financial Services Bond Mar 2028 Index', 'Nifty AAA Bond Plus G-Sec Mar 2035 30:70 Index', 'Nifty Chemicals', 'Nifty Waves', 'Nifty AAA Financial Services Bond Plus G-Sec Apr 2028 90:10 Index', 'Nifty AAA Financial Services Bond Plus G-Sec Apr 2027 90:10 Index', 'NIFTY INFRALOG', 'Nifty Financial Services 3 to 6 Months Debt Index', 'Nifty Financial Services 9 to 12 Months Debt Index', 'NIFTY500 HEALTH', 'NIFTY TMMQ 50', 'NIFTY FPI 150', 'Nifty Conglomerate 50'
+]
+
+selected_index = st.selectbox("Select Index", options=INDICES, index=INDICES.index("Nifty Pharma"))
+
+if st.button("Fetch Data"):
+    if selected_index:
+        run_fetch_pipeline(selected_index)
+    else:
+        st.warning("Please select an index.")
